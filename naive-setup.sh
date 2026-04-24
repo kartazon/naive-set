@@ -521,13 +521,10 @@ install_systemd_unit() {
   echo "Unit caddy-naive.service installed and enabled." >&2
 }
 
-# ---------------------------------------------------------------------------
-# _script_dir  →  absolute directory of the running script (symlink-safe)
-# ---------------------------------------------------------------------------
 _script_dir() {
   local src="$0"
   while [[ -L "$src" ]]; do src="$(readlink "$src")"; done
-  dirname "$(cd "$(dirname "$src")" && pwd)"
+  cd "$(dirname "$src")" && pwd
 }
 
 # ---------------------------------------------------------------------------
