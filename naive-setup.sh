@@ -65,7 +65,6 @@ prompt_install_yes() {
 
 # ---------------------------------------------------------------------------
 # offer_install_dependencies
-# Installs missing required packages via apt-get (Debian/Ubuntu only).
 # ---------------------------------------------------------------------------
 offer_install_dependencies() {
   local pkgs=""
@@ -78,7 +77,6 @@ offer_install_dependencies() {
   { command -v base64 >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1; } \
     || pkgs+=" openssl"
 
-  # Deduplicate
   pkgs=$(echo "$pkgs" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
 
   if [[ -n "$pkgs" ]]; then
@@ -91,7 +89,6 @@ offer_install_dependencies() {
     fi
   fi
 
-  # Optional: qrencode for terminal QR
   if ! command -v qrencode >/dev/null 2>&1 && [[ -t 0 ]]; then
     printf 'Optional: install qrencode for a scannable QR in the terminal. Install now? [y/N]: '
     read -r _qr
@@ -217,7 +214,7 @@ function unescape_caddy(q,    n, inner, i, c, c2, out) {
 }
 function shquote(s,    t) {
   t = s
-  gsub(/\047/, "'\''", t)
+  gsub(/\047/, "'\\''", t)
   return "'" t "'"
 }
 function read_caddy_quoted(buf, pos,    n, i, c, c2, out) {
@@ -600,6 +597,20 @@ main() {
   CADDY_BIN=$(find "$CADDY_DIR" -type f -name caddy | head -n1)
   [[ -n "$CADDY_BIN" ]] || die "Could not find caddy binary after extracting archive."
   chmod +x "$CADDY_BIN"
+
+  # -----------------------------------------------------------------------
+  # FIX: ensure binary is always at the path hardcoded in caddy-naive.service
+  # If the archive extracts into a subdirectory, create a stable symlink so
+  # ExecStart=/opt/caddy-forwardproxy-naive/caddy always resolves correctly.
+  # -----------------------------------------------------------------------
+  local CADDY_EXPECTED_BIN="$CADDY_DIR/caddy"
+  if [[ "$CADDY_BIN" != "$CADDY_EXPECTED_BIN" ]]; then
+    echo "Binary found at $CADDY_BIN (not at expected $CADDY_EXPECTED_BIN), creating symlink..." >&2
+    ln -sf "$CADDY_BIN" "$CADDY_EXPECTED_BIN" \
+      || die "Failed to create symlink $CADDY_EXPECTED_BIN -> $CADDY_BIN"
+  fi
+  [[ -x "$CADDY_EXPECTED_BIN" ]] \
+    || die "Caddy binary not executable at $CADDY_EXPECTED_BIN. Installation aborted."
 
   show_share_link_and_qr
   print_firewall_reminder
