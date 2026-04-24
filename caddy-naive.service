@@ -18,6 +18,7 @@ ProtectSystem=full
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ReadWritePaths=/var/lib/caddy-naive
+StateDirectory=caddy-naive
 NoNewPrivileges=true
 Restart=on-failure
 RestartSec=5s

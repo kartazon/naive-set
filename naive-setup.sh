@@ -475,8 +475,6 @@ show_share_link_and_qr() {
 
 # ---------------------------------------------------------------------------
 # print_firewall_reminder
-# Detects the active firewall tool and prints ready-to-run commands for
-# opening ports 80 (HTTP/ACME) and 443 (HTTPS/NaiveProxy).
 # ---------------------------------------------------------------------------
 print_firewall_reminder() {
   echo ""
@@ -663,22 +661,116 @@ check_ports() {
 }
 
 # ---------------------------------------------------------------------------
-# System user for Caddy.
+# System user and state directory for Caddy.
+# Home is /var/lib/caddy-naive (state/certs) while the binary lives in
+# /opt/caddy-forwardproxy-naive (read-only install dir).
 # ---------------------------------------------------------------------------
 CADDY_USER="caddy-naive"
+CADDY_STATE_DIR="/var/lib/caddy-naive"
 
 ensure_caddy_user() {
+  # Create state directory first so useradd/adduser can use it as home.
+  mkdir -p "$CADDY_STATE_DIR"
+
   if id "$CADDY_USER" >/dev/null 2>&1; then
+    # User exists - make sure home dir ownership is correct.
+    chown "$CADDY_USER":"$CADDY_USER" "$CADDY_STATE_DIR"
+    chmod 0700 "$CADDY_STATE_DIR"
     return 0
   fi
-  echo "Creating system user '$CADDY_USER'..." >&2
+
+  echo "Creating system user '$CADDY_USER' with home $CADDY_STATE_DIR..." >&2
   if command -v useradd >/dev/null 2>&1; then
-    useradd -r -s /bin/false -M -d /opt/caddy-forwardproxy-naive "$CADDY_USER"
+    useradd -r -s /bin/false -d "$CADDY_STATE_DIR" -M "$CADDY_USER"
   elif command -v adduser >/dev/null 2>&1; then
-    adduser -S -H -s /sbin/nologin -D "$CADDY_USER"
+    # BusyBox / Alpine adduser syntax
+    adduser -S -H -s /sbin/nologin -D -h "$CADDY_STATE_DIR" "$CADDY_USER"
   else
     die "Cannot create system user '$CADDY_USER': neither useradd nor adduser found."
   fi
+
+  chown "$CADDY_USER":"$CADDY_USER" "$CADDY_STATE_DIR"
+  chmod 0700 "$CADDY_STATE_DIR"
+}
+
+# ---------------------------------------------------------------------------
+# install_setcap_or_die PM CADDY_BIN
+# Ensures setcap is available, or offers to install libcap, or dies.
+# ---------------------------------------------------------------------------
+install_setcap_or_die() {
+  local pm=$1 caddy_bin=$2
+
+  if command -v setcap >/dev/null 2>&1; then
+    setcap 'cap_net_bind_service=+ep' "$caddy_bin"
+    return 0
+  fi
+
+  local pkg=""
+  case "$pm" in
+    apk) pkg="libcap" ;;
+    apt) pkg="libcap2-bin" ;;
+    dnf | yum) pkg="libcap" ;;
+    zypper) pkg="libcap-progs" ;;
+  esac
+
+  if [[ -n "$pkg" ]] && prompt_install_yes "setcap not found. Install '$pkg' now (required for Caddy to bind port 443 as non-root)?"; then
+    case "$pm" in
+      apk) apk add --no-cache "$pkg" ;;
+      apt) export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y "$pkg" ;;
+      dnf) dnf install -y "$pkg" ;;
+      yum) yum install -y "$pkg" ;;
+      zypper) zypper install -y "$pkg" ;;
+    esac
+    if command -v setcap >/dev/null 2>&1; then
+      setcap 'cap_net_bind_service=+ep' "$caddy_bin"
+      return 0
+    fi
+  fi
+
+  die "setcap is required so that Caddy can bind port 443 without running as root.\n" \
+    "Install the appropriate package (libcap2-bin on Debian/Ubuntu, libcap on Alpine/RHEL)\n" \
+    "and re-run this script."
+}
+
+# ---------------------------------------------------------------------------
+# detect_pm - print package manager name or empty string
+# ---------------------------------------------------------------------------
+detect_pm() {
+  if [[ -f /etc/alpine-release ]] && command -v apk >/dev/null 2>&1; then
+    echo apk
+  elif command -v apt-get >/dev/null 2>&1; then
+    echo apt
+  elif command -v dnf >/dev/null 2>&1; then
+    echo dnf
+  elif command -v yum >/dev/null 2>&1; then
+    echo yum
+  elif command -v zypper >/dev/null 2>&1; then
+    echo zypper
+  else
+    echo ""
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# install_systemd_unit UNIT_SRC
+# Copies the bundled unit file into /etc/systemd/system/ and enables it.
+# ---------------------------------------------------------------------------
+install_systemd_unit() {
+  local unit_src=$1
+  local unit_dst="/etc/systemd/system/caddy-naive.service"
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "systemctl not found - skipping unit installation (non-systemd system)." >&2
+    return 0
+  fi
+
+  echo "Installing systemd unit -> $unit_dst" >&2
+  cp "$unit_src" "$unit_dst"
+  chmod 0644 "$unit_dst"
+
+  systemctl daemon-reload
+  systemctl enable caddy-naive
+  echo "Unit caddy-naive.service installed and enabled." >&2
 }
 
 main() {
@@ -695,6 +787,9 @@ main() {
     || die "Need base64 or openssl for the share link. On Alpine: apk add --no-cache openssl coreutils"
   require_cmd tar
   require_cmd awk
+
+  local pm
+  pm=$(detect_pm)
 
   local caddyfile_path="/etc/caddy/Caddyfile"
   mkdir -p /etc/caddy /var/www/html
@@ -777,19 +872,32 @@ main() {
   [[ -n "$CADDY_BIN" ]] || die "Could not find caddy binary after extracting archive."
   chmod +x "$CADDY_BIN"
 
-  if command -v setcap >/dev/null 2>&1; then
-    setcap 'cap_net_bind_service=+ep' "$CADDY_BIN"
-  else
-    echo "Warning: setcap not found - Caddy may fail to bind port 443 as non-root." >&2
-    echo "  Install: apt install libcap2-bin  OR  apk add libcap" >&2
-  fi
+  # --- setcap: required to bind port 443 as non-root; die if unavailable ---
+  install_setcap_or_die "$pm" "$CADDY_BIN"
 
   show_share_link_and_qr
   print_firewall_reminder
 
-  echo "Starting Caddy as '$CADDY_USER': $CADDY_BIN run --config $caddyfile_path"
-  cd "$(dirname "$CADDY_BIN")"
-  exec su -s /bin/sh "$CADDY_USER" -c "\"$CADDY_BIN\" run --config \"$caddyfile_path\""
+  # --- Install and start via systemd if available; else fall back to exec ---
+  local UNIT_SRC
+  UNIT_SRC="$(dirname "$(realpath "$0")")/caddy-naive.service"
+
+  if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_SRC" ]]; then
+    install_systemd_unit "$UNIT_SRC"
+    echo "Starting caddy-naive via systemd..."
+    systemctl start caddy-naive
+    echo ""
+    echo "Caddy is running. Manage with:"
+    echo "  systemctl status  caddy-naive"
+    echo "  systemctl restart caddy-naive"
+    echo "  systemctl stop    caddy-naive"
+    echo "  journalctl -u caddy-naive -f"
+  else
+    echo "systemd not available or unit file not found - starting Caddy directly."
+    echo "Starting Caddy as '$CADDY_USER': $CADDY_BIN run --config $caddyfile_path"
+    cd "$(dirname "$CADDY_BIN")"
+    exec su -s /bin/sh "$CADDY_USER" -c "\"$CADDY_BIN\" run --config \"$caddyfile_path\""
+  fi
 }
 
 require_root
