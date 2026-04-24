@@ -447,10 +447,12 @@ install_systemd_unit() {
   echo "Unit caddy-naive.service installed and enabled." >&2
 }
 
+# ---------------------------------------------------------------------------
+# FIX: readlink -f корректно разворачивает все уровни симлинков включая
+# относительные пути, в отличие от цикла с readlink без флага.
+# ---------------------------------------------------------------------------
 _script_dir() {
-  local src="$0"
-  while [[ -L "$src" ]]; do src="$(readlink "$src")"; done
-  ( cd "$(dirname "$src")" && pwd )
+  dirname "$(readlink -f "$0")"
 }
 
 main() {
@@ -563,9 +565,6 @@ main() {
   [[ -x "$CADDY_EXPECTED_BIN" ]] \
     || die "Caddy binary not executable at $CADDY_EXPECTED_BIN. Installation aborted."
 
-  show_share_link_and_qr
-  print_firewall_reminder
-
   local UNIT_SRC
   UNIT_SRC="$(_script_dir)/caddy-naive.service"
   [[ -f "$UNIT_SRC" ]] || die "Unit file not found: $UNIT_SRC. Ensure caddy-naive.service is in the same directory as this script."
@@ -575,6 +574,9 @@ main() {
   echo "Starting caddy-naive via systemd..."
   systemctl start caddy-naive \
     || die "systemctl start caddy-naive failed. Check: journalctl -u caddy-naive -xe"
+
+  show_share_link_and_qr
+  print_firewall_reminder
 
   echo ""
   echo "Caddy is running. Manage with:"
