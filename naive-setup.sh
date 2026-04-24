@@ -481,32 +481,6 @@ ensure_caddy_user() {
 }
 
 # ---------------------------------------------------------------------------
-# install_setcap_or_die CADDY_BIN
-# Ensures setcap is available (installs libcap2-bin if missing), then applies.
-# ---------------------------------------------------------------------------
-install_setcap_or_die() {
-  local caddy_bin=$1
-
-  if command -v setcap >/dev/null 2>&1; then
-    setcap 'cap_net_bind_service=+ep' "$caddy_bin"
-    return 0
-  fi
-
-  echo "setcap not found (package: libcap2-bin)." >&2
-  if prompt_install_yes "Install libcap2-bin now (required for Caddy to bind port 443 as non-root)?"; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -y libcap2-bin
-    if command -v setcap >/dev/null 2>&1; then
-      setcap 'cap_net_bind_service=+ep' "$caddy_bin"
-      return 0
-    fi
-  fi
-
-  die "setcap is required to run Caddy on port 443 as non-root. Install libcap2-bin and re-run."
-}
-
-# ---------------------------------------------------------------------------
 # install_systemd_unit UNIT_SRC
 # ---------------------------------------------------------------------------
 install_systemd_unit() {
@@ -629,8 +603,6 @@ main() {
   CADDY_BIN=$(find "$CADDY_DIR" -type f -name caddy | head -n1)
   [[ -n "$CADDY_BIN" ]] || die "Could not find caddy binary after extracting archive."
   chmod +x "$CADDY_BIN"
-
-  install_setcap_or_die "$CADDY_BIN"
 
   show_share_link_and_qr
   print_firewall_reminder
