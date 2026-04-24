@@ -2,7 +2,7 @@
 set -euo pipefail
 
 die() {
-  echo "Error: $*" >&2
+  printf 'Error: %s\n' "$*" >&2
   exit 1
 }
 
