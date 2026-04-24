@@ -492,7 +492,7 @@ install_systemd_unit() {
 _script_dir() {
   local src="$0"
   while [[ -L "$src" ]]; do src="$(readlink "$src")"; done
-  cd "$(dirname "$src")" && pwd
+  ( cd "$(dirname "$src")" && pwd )
 }
 
 # ---------------------------------------------------------------------------
