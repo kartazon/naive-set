@@ -1,0 +1,26 @@
+[Unit]
+Description=Caddy NaiveProxy (forwardproxy)
+Documentation=https://caddyserver.com/docs/ https://github.com/klzgrad/naiveproxy/wiki/Run-Caddy-as-a-daemon
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User=caddy-naive
+Group=caddy-naive
+ExecStart=/opt/caddy-forwardproxy-naive/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/opt/caddy-forwardproxy-naive/caddy reload --config /etc/caddy/Caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+LimitNPROC=512
+PrivateTmp=true
+ProtectSystem=full
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ReadWritePaths=/var/lib/caddy-naive
+NoNewPrivileges=true
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
