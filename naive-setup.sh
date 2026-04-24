@@ -464,20 +464,17 @@ CADDY_USER="caddy-naive"
 CADDY_STATE_DIR="/var/lib/caddy-naive"
 
 ensure_caddy_user() {
-  mkdir -p "$CADDY_STATE_DIR"
-
-  if id "$CADDY_USER" >/dev/null 2>&1; then
-    chown "$CADDY_USER":"$CADDY_USER" "$CADDY_STATE_DIR"
-    chmod 0700 "$CADDY_STATE_DIR"
-    return 0
+  if ! id "$CADDY_USER" >/dev/null 2>&1; then
+    echo "Creating system user '$CADDY_USER' with home $CADDY_STATE_DIR..." >&2
+    mkdir -p "$CADDY_STATE_DIR"
+    useradd -r -s /bin/false -d "$CADDY_STATE_DIR" -M "$CADDY_USER" \
+      || die "Failed to create system user '$CADDY_USER'."
   fi
 
-  echo "Creating system user '$CADDY_USER' with home $CADDY_STATE_DIR..." >&2
-  useradd -r -s /bin/false -d "$CADDY_STATE_DIR" -M "$CADDY_USER" \
-    || die "Failed to create system user '$CADDY_USER'."
-
-  chown "$CADDY_USER":"$CADDY_USER" "$CADDY_STATE_DIR"
-  chmod 0700 "$CADDY_STATE_DIR"
+  if [[ -d "$CADDY_STATE_DIR" ]]; then
+    chown "$CADDY_USER":"$CADDY_USER" "$CADDY_STATE_DIR"
+    chmod 0700 "$CADDY_STATE_DIR"
+  fi
 }
 
 # ---------------------------------------------------------------------------
