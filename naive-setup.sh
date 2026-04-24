@@ -28,9 +28,7 @@ require_apt() {
   command -v apt-get >/dev/null 2>&1 || die "apt-get not found. This script supports Debian/Ubuntu only."
 }
 
-# ---------------------------------------------------------------------------
-# print_url_ascii_box URL
-# ---------------------------------------------------------------------------
+
 print_url_ascii_box() {
   local url=$1
   local w=72
@@ -45,9 +43,6 @@ print_url_ascii_box() {
   echo "  (ASCII box - not a QR; use the link or install qrencode for a scannable terminal QR.)"
 }
 
-# ---------------------------------------------------------------------------
-# prompt_install_yes MSG  →  0 = yes, 1 = no
-# ---------------------------------------------------------------------------
 prompt_install_yes() {
   local _msg=$1
   if [[ ! -t 0 ]]; then
@@ -63,9 +58,6 @@ prompt_install_yes() {
   esac
 }
 
-# ---------------------------------------------------------------------------
-# offer_install_dependencies
-# ---------------------------------------------------------------------------
 offer_install_dependencies() {
   local pkgs=""
 
@@ -102,24 +94,18 @@ offer_install_dependencies() {
   fi
 }
 
-# ---------------------------------------------------------------------------
-# fetch_public_ip
-# ---------------------------------------------------------------------------
+
 fetch_public_ip() {
   curl --connect-timeout 10 --max-time 30 -fsSL "https://whatismyip.akamai.com/" | tr -d '\r\n'
 }
 
-# ---------------------------------------------------------------------------
-# download_to URL DEST
-# ---------------------------------------------------------------------------
+
 download_to() {
   local url=$1 dest=$2
   curl --connect-timeout 10 --max-time 120 -fsSL "$url" -o "$dest"
 }
 
-# ---------------------------------------------------------------------------
-# lookup_domain_ipv4 DOMAIN
-# ---------------------------------------------------------------------------
+
 lookup_domain_ipv4() {
   local domain=$1 ips=""
 
@@ -137,9 +123,7 @@ lookup_domain_ipv4() {
   printf '%s' "$ips"
 }
 
-# ---------------------------------------------------------------------------
-# domain_resolves_to_ip DOMAIN EXPECTED_IP
-# ---------------------------------------------------------------------------
+
 domain_resolves_to_ip() {
   local domain=$1 expected_ip=$2 ips
   ips=$(lookup_domain_ipv4 "$domain")
@@ -155,9 +139,6 @@ domain_resolves_to_ip() {
   return 1
 }
 
-# ---------------------------------------------------------------------------
-# caddy_quote / write_caddyfile / exports_from_caddyfile
-# ---------------------------------------------------------------------------
 caddy_quote() {
   local _s=$1 _out
   _out=$(printf '%s' "$_s" | sed 's/\\/\\\\/g; s/"/\\"/g')
@@ -280,9 +261,6 @@ AWK
   return "$_ae"
 }
 
-# ---------------------------------------------------------------------------
-# naive_share_url / show_share_link_and_qr
-# ---------------------------------------------------------------------------
 naive_share_url() {
   local u=$1 p=$2 d=$3 raw b64
   raw="${u}:${p}@${d}:443"
@@ -316,9 +294,6 @@ show_share_link_and_qr() {
   echo ""
 }
 
-# ---------------------------------------------------------------------------
-# print_firewall_reminder
-# ---------------------------------------------------------------------------
 print_firewall_reminder() {
   echo ""
   echo "================================================================================"
@@ -354,15 +329,9 @@ print_firewall_reminder() {
   echo ""
 }
 
-# ---------------------------------------------------------------------------
-# mktemp helpers
-# ---------------------------------------------------------------------------
 mktemp_file() { mktemp "/tmp/naive-caddy.XXXXXX"; }
 mktemp_tar()  { mktemp "/tmp/naive-tar.XXXXXX";   }
 
-# ---------------------------------------------------------------------------
-# read_secret PROMPT  →  sets $PROXY_PASS
-# ---------------------------------------------------------------------------
 read_secret() {
   local prompt=$1
   if [[ -t 0 ]]; then
@@ -374,9 +343,7 @@ read_secret() {
   fi
 }
 
-# ---------------------------------------------------------------------------
-# port_owner PORT
-# ---------------------------------------------------------------------------
+
 port_owner() {
   local port=$1 result=""
 
@@ -428,9 +395,6 @@ port_owner() {
   return 1
 }
 
-# ---------------------------------------------------------------------------
-# check_ports
-# ---------------------------------------------------------------------------
 check_ports() {
   echo "Checking ports 80 and 443..." >&2
   local failed=0 owner80 owner443
@@ -454,9 +418,6 @@ check_ports() {
   [[ "$failed" -eq 0 ]] || die "Occupied ports must be freed before Caddy can start."
 }
 
-# ---------------------------------------------------------------------------
-# System user and state directory
-# ---------------------------------------------------------------------------
 CADDY_USER="caddy-naive"
 CADDY_STATE_DIR="/var/lib/caddy-naive"
 
@@ -474,9 +435,6 @@ ensure_caddy_user() {
   fi
 }
 
-# ---------------------------------------------------------------------------
-# install_systemd_unit UNIT_SRC
-# ---------------------------------------------------------------------------
 install_systemd_unit() {
   local unit_src=$1
   local unit_dst="/etc/systemd/system/caddy-naive.service"
@@ -495,9 +453,6 @@ _script_dir() {
   ( cd "$(dirname "$src")" && pwd )
 }
 
-# ---------------------------------------------------------------------------
-# main
-# ---------------------------------------------------------------------------
 main() {
   echo "Naive server setup (Caddy + forwardproxy)..." >&2
 
@@ -525,7 +480,6 @@ main() {
     local _exports
     _exports=$(exports_from_caddyfile "$caddyfile_path") \
       || die "Could not parse $caddyfile_path (expected :443, tls, and basic_auth lines)."
-    # shellcheck disable=SC1090
     eval "$_exports"
   else
     printf 'Domain name (e.g. example.com): '
@@ -587,22 +541,19 @@ main() {
 
   local TMP_TAR
   TMP_TAR=$(mktemp_tar)
+  trap 'rm -f "$TMP_TAR"' EXIT
   echo "Downloading Caddy (forwardproxy naive)..."
   download_to "$CADDY_RELEASE_URL" "$TMP_TAR"
   tar -xJf "$TMP_TAR" -C "$CADDY_DIR" \
     || die "Extracting Caddy archive failed. Ensure xz-utils is installed: apt-get install xz-utils"
   rm -f "$TMP_TAR"
+  trap - EXIT
 
   local CADDY_BIN
   CADDY_BIN=$(find "$CADDY_DIR" -type f -name caddy | head -n1)
   [[ -n "$CADDY_BIN" ]] || die "Could not find caddy binary after extracting archive."
   chmod +x "$CADDY_BIN"
 
-  # -----------------------------------------------------------------------
-  # FIX: ensure binary is always at the path hardcoded in caddy-naive.service
-  # If the archive extracts into a subdirectory, create a stable symlink so
-  # ExecStart=/opt/caddy-forwardproxy-naive/caddy always resolves correctly.
-  # -----------------------------------------------------------------------
   local CADDY_EXPECTED_BIN="$CADDY_DIR/caddy"
   if [[ "$CADDY_BIN" != "$CADDY_EXPECTED_BIN" ]]; then
     echo "Binary found at $CADDY_BIN (not at expected $CADDY_EXPECTED_BIN), creating symlink..." >&2
