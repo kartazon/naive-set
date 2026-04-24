@@ -684,7 +684,10 @@ ensure_caddy_user() {
     useradd -r -s /bin/false -d "$CADDY_STATE_DIR" -M "$CADDY_USER"
   elif command -v adduser >/dev/null 2>&1; then
     # BusyBox / Alpine adduser syntax
-    adduser -S -H -s /sbin/nologin -D -h "$CADDY_STATE_DIR" "$CADDY_USER"
+    
+    adduser -S -H -D -h "$CADDY_STATE_DIR" "$CADDY_USER" 2>/dev/null \
+      || adduser -S -H -s /sbin/nologin -D -h "$CADDY_STATE_DIR" "$CADDY_USER"
+    
   else
     die "Cannot create system user '$CADDY_USER': neither useradd nor adduser found."
   fi
@@ -713,6 +716,10 @@ install_setcap_or_die() {
     zypper) pkg="libcap-progs" ;;
   esac
 
+  if [[ -z "$pkg" ]]; then
+    die "setcap not found and package manager unknown. Install libcap manually and re-run."
+  fi
+
   if [[ -n "$pkg" ]] && prompt_install_yes "setcap not found. Install '$pkg' now (required for Caddy to bind port 443 as non-root)?"; then
     case "$pm" in
       apk) apk add --no-cache "$pkg" ;;
@@ -727,9 +734,7 @@ install_setcap_or_die() {
     fi
   fi
 
-  die "setcap is required so that Caddy can bind port 443 without running as root.\n" \
-    "Install the appropriate package (libcap2-bin on Debian/Ubuntu, libcap on Alpine/RHEL)\n" \
-    "and re-run this script."
+  die "setcap is required. Install libcap2-bin (Debian/Ubuntu) or libcap (Alpine/RHEL) and re-run this script."
 }
 
 # ---------------------------------------------------------------------------
@@ -771,6 +776,12 @@ install_systemd_unit() {
   systemctl daemon-reload
   systemctl enable caddy-naive
   echo "Unit caddy-naive.service installed and enabled." >&2
+}
+
+_script_dir() {
+  local src="$0"
+  while [[ -L "$src" ]]; do src="$(readlink "$src")"; done
+  dirname "$(cd "$(dirname "$src")" && pwd)"
 }
 
 main() {
@@ -842,6 +853,7 @@ main() {
     trap 'rm -f "$TMP_CADDY"' EXIT
     write_caddyfile "$DOMAIN_TRIM" "$EMAIL" "$PROXY_USER" "$PROXY_PASS" "$TMP_CADDY"
     mv "$TMP_CADDY" "$caddyfile_path"
+    trap - EXIT
     ensure_caddy_user
     chown root:"$CADDY_USER" "$caddyfile_path"
     chmod 0640 "$caddyfile_path"
@@ -880,7 +892,7 @@ main() {
 
   # --- Install and start via systemd if available; else fall back to exec ---
   local UNIT_SRC
-  UNIT_SRC="$(dirname "$(realpath "$0")")/caddy-naive.service"
+  UNIT_SRC="$(_script_dir)/caddy-naive.service"
 
   if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_SRC" ]]; then
     install_systemd_unit "$UNIT_SRC"
